@@ -1,0 +1,379 @@
+import sqlite3
+from datetime import datetime, timedelta
+
+# Connect to SQLite
+conn = sqlite3.connect("library.db")
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS patrons (
+    patron_id TEXT PRIMARY KEY,
+    full_name TEXT NOT NULL,
+    dob TEXT NOT NULL,
+    gender TEXT NOT NULL
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS books (
+    isbn TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    author TEXT NOT NULL,
+    copies_total INTEGER DEFAULT 1,
+    copies_available INTEGER DEFAULT 1
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS loans (
+    loan_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    patron_id TEXT NOT NULL,
+    isbn TEXT NOT NULL,
+    borrowed_at TEXT NOT NULL,
+    due_at TEXT NOT NULL,
+    returned_at TEXT,
+    FOREIGN KEY (patron_id) REFERENCES patrons(patron_id),
+    FOREIGN KEY (isbn) REFERENCES books(isbn)
+)
+""")
+conn.commit()
+
+# Patron CRUD 
+def create_patron():
+    patron_id = input("Enter Patron ID: ")
+    cursor.execute("SELECT * FROM patrons WHERE patron_id = ?", (patron_id,))
+    if cursor.fetchone():
+        print("Patron ID already exists.")
+        return
+    full_name = input("Enter Full Name: ")
+    dob = input("Enter DOB (YYYY-MM-DD): ")
+    gender = input("Enter Gender (m/f): ")
+    cursor.execute("INSERT INTO patrons VALUES (?, ?, ?, ?)", (patron_id, full_name, dob, gender))
+    conn.commit()
+    print("Patron created.")
+
+def read_patron():
+    patron_id = input("Enter Patron ID: ")
+    cursor.execute("SELECT * FROM patrons WHERE patron_id = ?", (patron_id,))
+    record = cursor.fetchone()
+
+    if record:
+        print(f"ID: {record[0]}, Name: {record[1]}, DOB: {record[2]}, Gender: {record[3]}")
+
+        cursor.execute("""
+            SELECT isbn, borrowed_at, due_at, returned_at
+            FROM loans
+            WHERE patron_id = ?
+        """, (patron_id,))
+        loans = cursor.fetchall()
+
+        if not loans:
+            print("No active loans.")
+            print("No overdue penalties.")
+            print("Status: Clear")
+        else:
+            for loan in loans:
+                isbn, borrowed_at, due_at, returned_at = loan
+                borrowed_dayt = datetime.fromisoformat(borrowed_at)
+                due_dayt = datetime.fromisoformat(due_at)
+                returned_dayt = datetime.fromisoformat(returned_at) if returned_at else None
+                print(f"\nBook ISBN: {isbn}")
+                print(f"Borrowed on: {borrowed_dayt.strftime('%Y-%m-%d')}")
+                print(f"Due date: {due_dayt.strftime('%Y-%m-%d')}")
+                print(f"Returned on: {returned_dayt.strftime('%Y-%m-%d') if returned_dayt else 'Not yet returned'}")
+
+                today = datetime.now()
+
+                if returned_at is None:
+                    if due_dayt > today:
+                        days_remaining = (due_dayt - today).days
+                        print(f"Status: Still borrowed ({days_remaining} days remaining until due date)")
+                    else:
+                        days_late = (today - due_dayt).days
+                        penalty = days_late * 1.00
+                        print(f"Status: Overdue by {days_late} days. Penalty: RM{penalty:.2f}")
+                else:
+                    if returned_dayt > due_dayt:
+                        days_late = (returned_dayt - due_dayt).days
+                        penalty = days_late * 1.00
+                        print(f"Returned late by {days_late} days. Penalty: RM{penalty:.2f}")
+                    else:
+                        print("Returned on time.")
+    else:
+        print("Patron not found.")
+
+def update_patron():
+    patron_id = input("Enter Patron ID: ")
+    cursor.execute("SELECT * FROM patrons WHERE patron_id = ?", (patron_id,))
+    if cursor.fetchone():
+        print("What would you like to update?")
+        print("a. Full Name")
+        print("b. Date of Birth (DOB)")
+        print("c. Gender")
+        choice = input("Enter choice (a/b/c): ").lower()
+
+        if choice == "a":
+            new_value = input("Enter new Full Name: ")
+            cursor.execute("UPDATE patrons SET full_name = ? WHERE patron_id = ?", (new_value, patron_id))
+        elif choice == "b":
+            new_value = input("Enter new DOB (YYYY-MM-DD): ")
+            cursor.execute("UPDATE patrons SET dob = ? WHERE patron_id = ?", (new_value, patron_id))
+        elif choice == "c":
+            new_value = input("Enter new Gender (m/f): ")
+            cursor.execute("UPDATE patrons SET gender = ? WHERE patron_id = ?", (new_value, patron_id))
+        else:
+            print("Invalid choice.")
+            return
+
+        conn.commit()
+        print("Patron updated.")
+    else:
+        print("Patron not found.")
+
+def delete_patron():
+    patron_id = input("Enter Patron ID: ")
+    cursor.execute("DELETE FROM patrons WHERE patron_id = ?", (patron_id,))
+    conn.commit()
+    if cursor.rowcount == 0:
+        print("Patron not found.")
+        return
+    print("Patron deleted.")
+
+# Book CRUD
+def create_book():
+    isbn = input("Enter ISBN: ")
+    cursor.execute("SELECT * FROM books WHERE isbn = ?", (isbn,))
+    if cursor.fetchone():
+        print("Book already exists.")
+        return
+    title = input("Enter Title: ")
+    author = input("Enter Author: ")
+    copies = int(input("Enter Total Copies: "))
+    cursor.execute("INSERT INTO books VALUES (?, ?, ?, ?, ?)", (isbn, title, author, copies, copies))
+    conn.commit()
+    print("Book created.")
+
+def read_book():
+    isbn = input("Enter ISBN: ")
+    cursor.execute("SELECT * FROM books WHERE isbn = ?", (isbn,))
+    record = cursor.fetchone()
+    if record:
+        status = "Available" if record[4] > 0 else "Borrowed"
+        print(f"ISBN: {record[0]}\nTitle: {record[1]}\nAuthor: {record[2]}\n"
+              f"Total Copies: {record[3]}\nAvailable Copies: {record[4]}\nStatus: {status}")
+    else:
+        print("Book not found.")
+
+def update_book():
+    isbn = input("Enter ISBN: ")
+    cursor.execute("SELECT * FROM books WHERE isbn = ?", (isbn,))
+    if cursor.fetchone():
+        print("What would you like to update?")
+        print("a. Title")
+        print("b. Author")
+        print("c. Total Copies")
+        choice = input("Enter choice (a/b/c): ").lower()
+
+        if choice == "a":
+            new_value = input("Enter new Title: ")
+            cursor.execute("UPDATE books SET title = ? WHERE isbn = ?", (new_value, isbn))
+        elif choice == "b":
+            new_value = input("Enter new Author: ")
+            cursor.execute("UPDATE books SET author = ? WHERE isbn = ?", (new_value, isbn))
+        elif choice == "c":
+            new_value = int(input("Enter new Total Copies: "))
+            cursor.execute("SELECT copies_total, copies_available FROM books WHERE isbn = ?", (isbn,))
+            old_total, old_available = cursor.fetchone()
+            difference = new_value - old_total
+            new_available = old_available + difference
+            if new_available < 0:
+                new_available = 0
+            cursor.execute("UPDATE books SET copies_total = ?, copies_available = ? WHERE isbn = ?",
+                           (new_value, new_available, isbn))
+        else:
+            print("Invalid choice.")
+            return
+
+        conn.commit()
+        print("Book updated.")
+    else:
+        print("Book not found.")
+
+def delete_book():
+    isbn = input("Enter ISBN: ")
+    cursor.execute("DELETE FROM books WHERE isbn = ?", (isbn,))
+    conn.commit()
+    if cursor.rowcount == 0:
+        print("Book not found.")
+        return
+    print("Book deleted.")
+
+# Loan CRUD 
+def borrow_book():
+    patron_id = input("Enter Patron ID: ")
+    cursor.execute("SELECT * FROM patrons WHERE patron_id = ?", (patron_id,))
+    patron = cursor.fetchone()
+    if not patron:
+        print("Sorry! We cannot find what you are looking for.")
+        return
+
+    isbn = input("Enter Book ISBN: ")
+    cursor.execute("SELECT copies_available FROM books WHERE isbn = ?", (isbn,))
+    book = cursor.fetchone()
+    if not book:
+        print("Sorry! We cannot find what you are looking for.")
+        return
+    if book[0] <= 0:
+        print("No copies available.")
+        return
+
+    borrowed_at = datetime.now().isoformat()
+    due_at = (datetime.now() + timedelta(days=14)).isoformat()
+    cursor.execute("INSERT INTO loans (patron_id, isbn, borrowed_at, due_at) VALUES (?, ?, ?, ?)",
+                   (patron_id, isbn, borrowed_at, due_at))
+    cursor.execute("UPDATE books SET copies_available = copies_available - 1 WHERE isbn = ?", (isbn,))
+    conn.commit()
+    print("Book borrowed.")
+
+def return_book():
+    loan_id = input("Enter Loan ID: ")
+    cursor.execute("SELECT isbn, returned_at FROM loans WHERE loan_id = ?", (loan_id,))
+    loan = cursor.fetchone()
+    if not loan:
+        print("Loan not found.")
+        return
+    if loan[1] is not None:
+        print("Already returned.")
+        return
+    cursor.execute("UPDATE loans SET returned_at = ? WHERE loan_id = ?", (datetime.now().isoformat(), loan_id))
+    cursor.execute("UPDATE books SET copies_available = copies_available + 1 WHERE isbn = ?", (loan[0],))
+    conn.commit()
+    print("Book returned.")
+
+def delete_loan():
+    loan_id = input("Enter Loan ID: ")
+    cursor.execute("DELETE FROM loans WHERE loan_id = ?", (loan_id,))
+    conn.commit()
+    if cursor.rowcount == 0:
+        print("Loan not found.")
+        return
+    print("Loan deleted.")
+
+def list_borrowed_books():
+    patron_id = input("Enter Patron ID: ")
+    cursor.execute("SELECT * FROM patrons WHERE patron_id = ?", (patron_id,))
+    if cursor.fetchone() is None:
+        print("Patron not found.")
+        return
+    
+    cursor.execute("""
+        SELECT l.loan_id, b.isbn, b.title, b.author, l.borrowed_at, l.due_at, l.returned_at, l.late_penalty
+        FROM loans l
+        JOIN books b ON l.isbn = b.isbn
+        WHERE l.patron_id = ?
+        ORDER BY l.borrowed_at DESC
+    """, (patron_id,))
+    records = cursor.fetchall()
+    if not records:
+        print("No borrowed books found for this patron.")
+        return
+    print(f"\nBorrowed books for Patron {patron_id}:")
+    today = datetime.now()
+    for r in records:
+        loan_id, isbn, title, author, borrowed_at, due_at, returned_at, late_penalty = r
+        if returned_at is None:
+            if today > datetime.fromisoformat(due_at):
+                status = "Overdue"
+            else:
+                status = "On Loan"
+        else:
+            if late_penalty and late_penalty > 0:
+                status = "Returned (Penalty Outstanding)"
+            else:
+                status = "Returned (No Penalty / Penalty Paid)"
+        print(f"Loan ID: {loan_id}, ISBN: {isbn}, Title: {title}, Author: {author}, "
+              f"Borrowed: {borrowed_at}, Due: {due_at}, Status: {status}, Penalty: RM{late_penalty if late_penalty else 0}")
+
+def update_late_penalty():
+    loan_id = input("Enter Loan ID to update penalty: ")
+    cursor.execute("SELECT late_penalty FROM loans WHERE loan_id = ?", (loan_id,))
+    record = cursor.fetchone()
+    if record is None:
+        print("Loan not found.")
+        return
+
+    current_penalty = record[0] if record[0] else 0
+    print(f"Current penalty for Loan {loan_id}: RM{current_penalty}")
+
+    try:
+        new_penalty = float(input("Enter new penalty amount (e.g., 0 to clear): "))
+    except ValueError:
+        print("Invalid input. Penalty must be a number.")
+        return
+
+    cursor.execute("UPDATE loans SET late_penalty = ? WHERE loan_id = ?", (new_penalty, loan_id))
+    conn.commit()
+    print(f"Penalty for Loan {loan_id} updated to RM{new_penalty}.")
+
+# Statistics
+def summary_statistics():
+    cursor.execute("SELECT COUNT(*) FROM patrons")
+    patrons = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM books")
+    books = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM loans WHERE returned_at IS NULL")
+    active_loans = cursor.fetchone()[0]
+    print(f"Total Patrons: {patrons}, Total Books: {books}, Active Loans: {active_loans}")
+
+class Colors:
+    BLUE = '\033[34m'
+    GREEN = '\033[32m'
+    YELLOW = '\033[33m'
+    MAGENTA = '\033[35m'
+    RESET = '\033[0m'
+
+# Main Menu
+def main():
+    while True:
+        print(f"{Colors.BLUE}\n--- LibRealm Management System ---{Colors.RESET}")
+        print(f"{Colors.GREEN}\n ~ Patron Management ~")
+        print("1. Create Patron")
+        print("2. Read Patron")
+        print("3. Update Patron")
+        print("4. Delete Patron");{Colors.RESET}
+        print(f"{Colors.YELLOW}\n ~ Book Cataloguing System ~")
+        print("5. Create Book")
+        print("6. Read Book")
+        print("7. Update Book")
+        print("8. Delete Book");{Colors.RESET}
+        print(f"{Colors.MAGENTA}\n ~ Circulation ~")
+        print("9. Borrow Book")
+        print("10. Return Book")
+        print("11. Update Late Penalty")
+        print("12. Delete Loan")
+        print("13. Summary Statistics")
+        print("14. List of Borrowed Books by Patron");{Colors.RESET}
+        print(f"{Colors.RESET}15. Exit")
+        choice = input("Enter choice: ")
+        if choice == "1": create_patron()
+        elif choice == "2": read_patron()
+        elif choice == "3": update_patron()
+        elif choice == "4": delete_patron()
+        elif choice == "5": create_book()
+        elif choice == "6": read_book()
+        elif choice == "7": update_book()
+        elif choice == "8": delete_book()
+        elif choice == "9": borrow_book()
+        elif choice == "10": return_book()
+        elif choice == "11": update_late_penalty()
+        elif choice == "12": delete_loan()
+        elif choice == "13": summary_statistics()
+        elif choice == "14": list_borrowed_books() 
+        elif choice == "15":
+            print("Exiting LibRealm. Bye!")
+            break
+        else:
+            print("Invalid choice.")
+
+main()
+conn.close()
