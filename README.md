@@ -1,3 +1,2 @@
 # IML208-Individual-Project
-IML208: Programming for Libraries - LibRealm Management System
-Ellysha's
+IML208: Programming for Libraries - LibRealm Management System - Ellysha's
